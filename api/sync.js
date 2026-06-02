@@ -45,8 +45,7 @@ export async function GET(request) {
     for (const group of budgetMonth.categoryGroups) {
       for (const category of group.categories) {
         if (category.name === targetCategoryName) {
-          // Actual stores amounts as integers in milliunits (1000 = $1.00)
-          budgetedAmount = category.budgeted / 1000;
+          budgetedAmount = category.balance / 100;
           categoryFound = true;
           break;
         }
