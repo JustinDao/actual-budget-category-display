@@ -13,8 +13,10 @@ async function upstashSet(key, value) {
 
 export async function GET(request) {
   // Protect this endpoint with a secret so randos can't trigger it
-  const { searchParams } = new URL(request.url);
-  if (searchParams.get('secret') !== process.env.CRON_SECRET) {
+  const authHeader = request.headers.get('authorization');
+  const hasSecret = new URL(request.url).searchParams.get('secret') === process.env.CRON_SECRET;
+
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && !hasSecret) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
