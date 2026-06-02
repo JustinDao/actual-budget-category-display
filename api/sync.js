@@ -39,13 +39,13 @@ export async function GET(request) {
 
     // Find your target category across all groups
     const targetCategoryName = process.env.BUDGET_CATEGORY_NAME; // e.g. "Groceries"
-    let budgetedAmount = null;
+    let balance = null;
     let categoryFound = false;
 
     for (const group of budgetMonth.categoryGroups) {
       for (const category of group.categories) {
         if (category.name === targetCategoryName) {
-          budgetedAmount = category.balance / 100;
+          balance = category.balance / 100;
           categoryFound = true;
           break;
         }
@@ -61,7 +61,7 @@ export async function GET(request) {
 
     const payload = {
       category: targetCategoryName,
-      budgeted: budgetedAmount,
+      balance: balance,
       month,
       updatedAt: new Date().toISOString(),
     };
