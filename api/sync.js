@@ -1,4 +1,5 @@
 import * as api from '@actual-app/api';
+import { mkdirSync } from 'fs';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -18,6 +19,8 @@ export async function GET(request) {
   }
 
   try {
+    mkdirSync('/tmp/actual-cache', { recursive: true });
+    
     await api.init({
       dataDir: '/tmp/actual-cache',
       serverURL: process.env.ACTUAL_SERVER_URL,
