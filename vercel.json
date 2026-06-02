@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/sync?secret=99633a28c2bccd63ac4cd6ea565d495b",
+      "path": "/api/sync?secret={{CRON_SECRET}}",
       "schedule": "0 8 * * *"
     }
   ]
