@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Budget</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      background: #fafaf9;
+      color: #1a1a18;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      text-align: center;
+      padding: 3rem 4rem;
+    }
+
+    .label {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #888780;
+      margin-bottom: 1rem;
+    }
+
+    .amount-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .currency {
+      font-size: 20px;
+      font-weight: 400;
+      color: #5f5e5a;
+      align-self: flex-start;
+      margin-top: 14px;
+    }
+
+    .amount {
+      font-size: 80px;
+      font-weight: 300;
+      letter-spacing: -3px;
+      line-height: 1;
+      color: #1a1a18;
+    }
+
+    .month {
+      font-size: 14px;
+      color: #888780;
+      margin-top: 0.75rem;
+    }
+
+    .updated {
+      font-size: 11px;
+      color: #b4b2a9;
+      margin-top: 2.5rem;
+    }
+
+    .error {
+      font-size: 14px;
+      color: #a32d2d;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { background: #1a1a18; color: #f1efe8; }
+      .amount { color: #f1efe8; }
+      .currency { color: #888780; }
+      .label { color: #5f5e5a; }
+      .month { color: #5f5e5a; }
+      .updated { color: #444441; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p class="label" id="cat-label">Loading</p>
+    <div class="amount-row">
+      <span class="currency">$</span>
+      <span class="amount" id="amount">—</span>
+    </div>
+    <p class="month" id="month-label"></p>
+    <p class="updated" id="updated-label"></p>
+  </div>
+
+  <script>
+    async function load() {
+      try {
+        const res = await fetch('/api/budget');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        document.getElementById('cat-label').textContent = data.category;
+
+        const amt = Math.abs(data.balance ?? data.budgeted ?? 0);
+        document.getElementById('amount').textContent = amt.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+
+        if (data.month) {
+          const [y, m] = data.month.split('-');
+          const monthName = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+          document.getElementById('month-label').textContent = monthName;
+        }
+
+        if (data.updatedAt) {
+          const d = new Date(data.updatedAt);
+          document.getElementById('updated-label').textContent =
+            'Updated ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      } catch (e) {
+        document.getElementById('cat-label').textContent = 'Error';
+        document.getElementById('amount').textContent = '—';
+        document.getElementById('month-label').classList.add('error');
+        document.getElementById('month-label').textContent = e.message;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
