@@ -61,12 +61,7 @@ export async function GET(request) {
     // Step 2: find investment accounts (re-fetch, since balance_current may have updated)
     const refreshedAccounts = await api.getAccounts()
     const acct = refreshedAccounts.find((a) => a.name === 'Microsoft 401k')
-    console.log('DEBUG account state:', {
-      type: acct?.type,
-      balance_current: acct?.balance_current,
-      offbudget: acct?.offbudget,
-      closed: acct?.closed,
-    })
+    console.log('DEBUG account state:', JSON.stringify(acct ?? {}))
     const investmentAccounts = refreshedAccounts.filter(
       (a) => a.type === 'investment' && a.balance_current != null && !a.closed,
     )
