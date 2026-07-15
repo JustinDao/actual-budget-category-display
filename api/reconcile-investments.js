@@ -60,10 +60,16 @@ export async function GET(request) {
 
     // Step 2: find investment accounts (re-fetch, since balance_current may have updated)
     const refreshedAccounts = await api.getAccounts()
-    const acct = refreshedAccounts.find((a) => a.name === 'Microsoft 401k')
-    console.log('DEBUG account state:', JSON.stringify(acct ?? {}))
+
+    // Step 2: find investment accounts — `type` isn't reliably present via the API,
+    // so we match against an explicit allowlist of account IDs instead.
+    const investmentAccountIds = (process.env.INVESTMENT_ACCOUNT_IDS || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+
     const investmentAccounts = refreshedAccounts.filter(
-      (a) => a.type === 'investment' && a.balance_current != null && !a.closed,
+      (a) => investmentAccountIds.includes(a.id) && a.balance_current != null && !a.closed,
     )
 
     const results = []
