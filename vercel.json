@@ -3,6 +3,10 @@
     {
       "path": "/api/sync",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/reconcile-investments",
+      "schedule": "0 8 * * *"
     }
   ]
 }
