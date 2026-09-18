@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@actual-app/api": "latest"
+    "@actual-app/api": "^26.9.0"
   }
 }
