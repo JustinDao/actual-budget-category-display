@@ -1,81 +1,118 @@
-import * as api from '@actual-app/api';
-import { mkdirSync } from 'fs';
+import * as api from '@actual-app/api'
+import { mkdirSync } from 'fs'
 
-const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+
+// Safety cap on how many transactions get stored. The true count is stored too.
+const MAX_STORED = 200
 
 async function upstashSet(key, value) {
-  const res = await fetch(`${UPSTASH_URL}/set/${key}/${encodeURIComponent(JSON.stringify(value))}`, {
+  const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
     headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-  });
-  return res.json();
+    body: JSON.stringify(value),
+  })
+  if (!res.ok) throw new Error(`Upstash write failed: ${res.status}`)
+  return res.json()
+}
+
+// Current month as YYYY-MM in Seattle time (Vercel runs in UTC)
+function currentMonthPT() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find((p) => p.type === 'year').value
+  const m = parts.find((p) => p.type === 'month').value
+  return `${y}-${m}`
 }
 
 export async function GET(request) {
-  // Protect this endpoint with a secret so randos can't trigger it
-  const authHeader = request.headers.get('authorization');
-  const hasSecret = new URL(request.url).searchParams.get('secret') === process.env.CRON_SECRET;
-
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && !hasSecret) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  // Fail closed if CRON_SECRET is missing. Vercel Cron sends this header automatically.
+  const secret = process.env.CRON_SECRET
+  if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    mkdirSync('/tmp/actual-cache', { recursive: true });
-    
+    mkdirSync('/tmp/actual-cache', { recursive: true })
+
     await api.init({
       dataDir: '/tmp/actual-cache',
       serverURL: process.env.ACTUAL_SERVER_URL,
       password: process.env.ACTUAL_PASSWORD,
-    });
+    })
 
     await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
       password: process.env.ACTUAL_ENCRYPTION_PASSWORD,
-    });
+    })
 
-    // Get current month in YYYY-MM format
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const month = currentMonthPT()
+    const budgetMonth = await api.getBudgetMonth(month)
 
-    const budgetMonth = await api.getBudgetMonth(month);
+    // Prefer matching by ID (stable); fall back to name
+    const targetId = process.env.BUDGET_CATEGORY_ID
+    const targetName = process.env.BUDGET_CATEGORY_NAME
 
-    // Find your target category across all groups
-    const targetCategoryName = process.env.BUDGET_CATEGORY_NAME; // e.g. "Groceries"
-    let balance = null;
-    let categoryFound = false;
+    const category = budgetMonth.categoryGroups
+      .flatMap((g) => g.categories)
+      .find((c) => (targetId ? c.id === targetId : c.name === targetName))
 
-    for (const group of budgetMonth.categoryGroups) {
-      for (const category of group.categories) {
-        if (category.name === targetCategoryName) {
-          balance = category.balance / 100;
-          categoryFound = true;
-          break;
-        }
-      }
-      if (categoryFound) break;
+    if (!category) {
+      return Response.json({ error: 'Category not found' }, { status: 404 })
     }
 
-    await api.shutdown();
+    // Transactions in this category for the current month, newest first
+    const { data: rows } = await api.runQuery(
+      api
+        .q('transactions')
+        .filter({
+          category: category.id,
+          date: { $transform: '$month', $eq: month },
+        })
+        .select(['id', 'date', 'amount', 'payee.name', 'notes'])
+        .orderBy({ date: 'desc' }),
+    )
 
-    if (!categoryFound) {
-      return Response.json({ error: `Category "${targetCategoryName}" not found` }, { status: 404 });
-    }
+    const transactions = rows.slice(0, MAX_STORED).map((t) => ({
+      id: t.id,
+      date: t.date, // 'YYYY-MM-DD'
+      amount: api.utils.integerToAmount(t.amount), // negative = spending, positive = refund
+      payee: t['payee.name'] ?? null,
+      notes: t.notes ?? null,
+    }))
 
     const payload = {
-      category: targetCategoryName,
-      balance: balance,
+      category: category.name,
+      balance: api.utils.integerToAmount(category.balance),
       month,
+      transactions,
+      transactionCount: rows.length, // true total, even if the stored list was capped
       updatedAt: new Date().toISOString(),
-    };
+    }
 
-    // Store in Upstash
-    await upstashSet('budget:amount', payload);
+    await upstashSet('budget:amount', payload)
 
-    return Response.json({ ok: true, ...payload });
+    return Response.json({
+      ok: true,
+      category: payload.category,
+      balance: payload.balance,
+      month: payload.month,
+      transactionCount: payload.transactionCount,
+      updatedAt: payload.updatedAt,
+    })
   } catch (err) {
-    console.error(err);
-    // Make sure we always shut down the api even on error
-    try { await api.shutdown(); } catch {}
-    return Response.json({ error: err.message }, { status: 500 });
+    console.error(err)
+    return Response.json({ error: err.message }, { status: 500 })
+  } finally {
+    // Always shut down the API, success or failure
+    try {
+      await api.shutdown()
+    } catch {}
   }
 }

@@ -1,132 +1,301 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Budget</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-      background: #fafaf9;
-      color: #1a1a18;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .card {
-      text-align: center;
-      padding: 3rem 4rem;
-    }
-
-    .label {
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #888780;
-      margin-bottom: 1rem;
-    }
-
-    .amount-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: center;
-      gap: 6px;
-    }
-
-    .currency {
-      font-size: 20px;
-      font-weight: 400;
-      color: #5f5e5a;
-      align-self: flex-start;
-      margin-top: 14px;
-    }
-
-    .amount {
-      font-size: 80px;
-      font-weight: 300;
-      letter-spacing: -3px;
-      line-height: 1;
-      color: #1a1a18;
-    }
-
-    .month {
-      font-size: 14px;
-      color: #888780;
-      margin-top: 0.75rem;
-    }
-
-    .updated {
-      font-size: 11px;
-      color: #b4b2a9;
-      margin-top: 2.5rem;
-    }
-
-    .error {
-      font-size: 14px;
-      color: #a32d2d;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      body { background: #1a1a18; color: #f1efe8; }
-      .amount { color: #f1efe8; }
-      .currency { color: #888780; }
-      .label { color: #5f5e5a; }
-      .month { color: #5f5e5a; }
-      .updated { color: #444441; }
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <p class="label" id="cat-label">Loading</p>
-    <div class="amount-row">
-      <span class="currency">$</span>
-      <span class="amount" id="amount">—</span>
-    </div>
-    <p class="month" id="month-label"></p>
-    <p class="updated" id="updated-label"></p>
-  </div>
-
-  <script>
-    async function load() {
-      try {
-        const res = await fetch('/api/budget');
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        document.getElementById('cat-label').textContent = data.category;
-
-        const amt = Math.abs(data.balance ?? data.budgeted ?? 0);
-        document.getElementById('amount').textContent = amt.toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
-
-        if (data.month) {
-          const [y, m] = data.month.split('-');
-          const monthName = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-          document.getElementById('month-label').textContent = monthName;
-        }
-
-        if (data.updatedAt) {
-          const d = new Date(data.updatedAt);
-          document.getElementById('updated-label').textContent =
-            'Updated ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        }
-      } catch (e) {
-        document.getElementById('cat-label').textContent = 'Error';
-        document.getElementById('amount').textContent = '—';
-        document.getElementById('month-label').classList.add('error');
-        document.getElementById('month-label').textContent = e.message;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Budget</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
-    }
 
-    load();
-  </script>
-</body>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+        background: #fafaf9;
+        color: #1a1a18;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+
+      .card {
+        text-align: center;
+        padding: 3rem 4rem;
+      }
+
+      .label {
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #888780;
+        margin-bottom: 1rem;
+      }
+
+      .amount-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .currency {
+        font-size: 20px;
+        font-weight: 400;
+        color: #5f5e5a;
+        align-self: flex-start;
+        margin-top: 14px;
+      }
+
+      .amount {
+        font-size: 80px;
+        font-weight: 300;
+        letter-spacing: -3px;
+        line-height: 1;
+        color: #1a1a18;
+      }
+
+      .month {
+        font-size: 14px;
+        color: #888780;
+        margin-top: 0.75rem;
+      }
+
+      .updated {
+        font-size: 11px;
+        color: #b4b2a9;
+        margin-top: 2.5rem;
+      }
+
+      .error {
+        font-size: 14px;
+        color: #a32d2d;
+      }
+
+      /* Transactions */
+      .txns {
+        width: 100%;
+        max-width: 420px;
+        list-style: none;
+        margin-top: 1rem;
+      }
+
+      .txn {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 0;
+        border-top: 1px solid #e8e6df;
+        font-size: 14px;
+      }
+
+      .txn-main {
+        min-width: 0;
+      }
+
+      .txn-payee {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .txn-date {
+        font-size: 12px;
+        color: #888780;
+        margin-top: 2px;
+      }
+
+      .txn-amt {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .txn-amt.refund {
+        color: #3b6d11;
+      }
+
+      .empty {
+        font-size: 13px;
+        color: #888780;
+        margin-top: 1rem;
+      }
+
+      .more {
+        margin-top: 0.5rem;
+        background: none;
+        border: none;
+        color: #888780;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .more:disabled {
+        cursor: default;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #1a1a18;
+          color: #f1efe8;
+        }
+        .amount {
+          color: #f1efe8;
+        }
+        .currency {
+          color: #888780;
+        }
+        .label {
+          color: #5f5e5a;
+        }
+        .month {
+          color: #5f5e5a;
+        }
+        .updated {
+          color: #444441;
+        }
+        .txn {
+          border-top-color: #2c2c2a;
+        }
+        .txn-amt.refund {
+          color: #97c459;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <p class="label" id="cat-label">Loading</p>
+      <div class="amount-row">
+        <span class="currency">$</span>
+        <span class="amount" id="amount">—</span>
+      </div>
+      <p class="month" id="month-label"></p>
+      <p class="updated" id="updated-label"></p>
+    </div>
+
+    <ul class="txns" id="txns"></ul>
+    <button class="more" id="more" hidden></button>
+
+    <script>
+      const PAGE_SIZE = 25
+
+      function formatMoney(n) {
+        return Math.abs(n).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      }
+
+      async function load() {
+        try {
+          const res = await fetch('/api/budget')
+          const data = await res.json()
+          if (data.error) throw new Error(data.error)
+
+          document.getElementById('cat-label').textContent = data.category
+
+          const amt = Math.abs(data.balance ?? data.budgeted ?? 0)
+          document.getElementById('amount').textContent = formatMoney(amt)
+
+          if (data.month) {
+            const [y, m] = data.month.split('-')
+            const monthName = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+            document.getElementById('month-label').textContent = monthName
+          }
+
+          if (data.updatedAt) {
+            const d = new Date(data.updatedAt)
+            document.getElementById('updated-label').textContent =
+              'Updated ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          }
+
+          renderTransactions(data)
+        } catch (e) {
+          document.getElementById('cat-label').textContent = 'Error'
+          document.getElementById('amount').textContent = '—'
+          document.getElementById('month-label').classList.add('error')
+          document.getElementById('month-label').textContent = e.message
+        }
+      }
+
+      function renderTransactions(data) {
+        const list = document.getElementById('txns')
+        const moreBtn = document.getElementById('more')
+        const txns = data.transactions ?? []
+        const total = data.transactionCount ?? txns.length
+
+        if (txns.length === 0) {
+          const p = document.createElement('p')
+          p.className = 'empty'
+          p.textContent = 'No transactions yet this month'
+          list.replaceWith(p)
+          return
+        }
+
+        let shown = 0
+
+        function renderRow(t) {
+          const [y, m, d] = t.date.split('-').map(Number)
+          const dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })
+
+          const li = document.createElement('li')
+          li.className = 'txn'
+
+          const main = document.createElement('div')
+          main.className = 'txn-main'
+
+          const payee = document.createElement('div')
+          payee.className = 'txn-payee'
+          payee.textContent = t.payee || t.notes || 'Unknown'
+
+          const date = document.createElement('div')
+          date.className = 'txn-date'
+          date.textContent = dateStr
+
+          main.append(payee, date)
+
+          const amt = document.createElement('div')
+          amt.className = 'txn-amt' + (t.amount > 0 ? ' refund' : '')
+          amt.textContent = (t.amount > 0 ? '+' : '') + '$' + formatMoney(t.amount)
+
+          li.append(main, amt)
+          list.append(li)
+        }
+
+        function renderMore(all = false) {
+          const next = all ? txns.length : Math.min(shown + PAGE_SIZE, txns.length)
+          for (let i = shown; i < next; i++) renderRow(txns[i])
+          shown = next
+
+          if (shown < txns.length) {
+            moreBtn.hidden = false
+            moreBtn.textContent = `Show all ${total}`
+          } else if (total > txns.length) {
+            // Stored list was capped by the cron job
+            moreBtn.hidden = false
+            moreBtn.disabled = true
+            moreBtn.textContent = `Showing latest ${txns.length} of ${total}`
+          } else {
+            moreBtn.hidden = true
+          }
+        }
+
+        moreBtn.addEventListener('click', () => renderMore(true))
+        renderMore()
+      }
+
+      load()
+    </script>
+  </body>
 </html>
