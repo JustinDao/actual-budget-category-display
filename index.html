@@ -1,25 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Budget</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
       background: #fafaf9;
       color: #1a1a18;
-      min-height: 100vh;
+      height: 100vh;
+      height: 100dvh;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
+      padding: 2rem 1rem;
+      /* Fallback: if the viewport is too small even for the minimum list size, the page scrolls */
+      overflow-y: auto;
     }
 
     .card {
+      flex: none;
       text-align: center;
       padding: 3rem 4rem;
+      /* Auto margins center the content, and degrade safely when space runs out */
+      margin-top: auto;
     }
 
     .label {
@@ -71,16 +85,117 @@
       color: #a32d2d;
     }
 
+    /* Transactions */
+    .txns-scroll {
+      width: 100%;
+      max-width: 420px;
+      margin-top: 1rem;
+      margin-bottom: auto;
+      /* Takes its natural height, shrinks to fit the viewport, never below the minimum */
+      flex: 0 1 auto;
+      min-height: 160px;
+      padding-right: 0.75rem;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+    }
+
+    .txns {
+      list-style: none;
+    }
+
+    .txn {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.75rem 0;
+      border-top: 1px solid #e8e6df;
+      font-size: 14px;
+    }
+
+    .txn-main {
+      min-width: 0;
+    }
+
+    .txn-payee {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .txn-date {
+      font-size: 12px;
+      color: #888780;
+      margin-top: 2px;
+    }
+
+    .txn-amt {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .txn-amt.refund {
+      color: #3b6d11;
+    }
+
+    .txn.assign .txn-payee {
+      color: #185fa5;
+    }
+
+    .txn.assign .txn-amt {
+      color: #185fa5;
+    }
+
+    .empty {
+      font-size: 13px;
+      color: #888780;
+      margin-top: 1rem;
+      margin-bottom: auto;
+    }
+
     @media (prefers-color-scheme: dark) {
-      body { background: #1a1a18; color: #f1efe8; }
-      .amount { color: #f1efe8; }
-      .currency { color: #888780; }
-      .label { color: #5f5e5a; }
-      .month { color: #5f5e5a; }
-      .updated { color: #444441; }
+      body {
+        background: #1a1a18;
+        color: #f1efe8;
+      }
+
+      .amount {
+        color: #f1efe8;
+      }
+
+      .currency {
+        color: #888780;
+      }
+
+      .label {
+        color: #5f5e5a;
+      }
+
+      .month {
+        color: #5f5e5a;
+      }
+
+      .updated {
+        color: #444441;
+      }
+
+      .txn {
+        border-top-color: #2c2c2a;
+      }
+
+      .txn-amt.refund {
+        color: #97c459;
+      }
+
+      .txn.assign .txn-payee,
+      .txn.assign .txn-amt {
+        color: #85b7eb;
+      }
     }
   </style>
 </head>
+
 <body>
   <div class="card">
     <p class="label" id="cat-label">Loading</p>
@@ -92,41 +207,112 @@
     <p class="updated" id="updated-label"></p>
   </div>
 
+  <div class="txns-scroll" id="txns-scroll">
+    <ul class="txns" id="txns"></ul>
+  </div>
+
   <script>
+    function formatMoney(n) {
+      return Math.abs(n).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })
+    }
+
     async function load() {
       try {
-        const res = await fetch('/api/budget');
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        const res = await fetch('/api/budget')
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
 
-        document.getElementById('cat-label').textContent = data.category;
+        document.getElementById('cat-label').textContent = data.category
 
-        const amt = Math.abs(data.balance ?? data.budgeted ?? 0);
-        document.getElementById('amount').textContent = amt.toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
+        const amt = Math.abs(data.balance ?? data.budgeted ?? 0)
+        document.getElementById('amount').textContent = formatMoney(amt)
 
         if (data.month) {
-          const [y, m] = data.month.split('-');
-          const monthName = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-          document.getElementById('month-label').textContent = monthName;
+          const [y, m] = data.month.split('-')
+          const monthName = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+          document.getElementById('month-label').textContent = monthName
         }
 
         if (data.updatedAt) {
-          const d = new Date(data.updatedAt);
+          const d = new Date(data.updatedAt)
           document.getElementById('updated-label').textContent =
-            'Updated ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            'Updated ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
         }
+
+        renderTransactions(data)
       } catch (e) {
-        document.getElementById('cat-label').textContent = 'Error';
-        document.getElementById('amount').textContent = '—';
-        document.getElementById('month-label').classList.add('error');
-        document.getElementById('month-label').textContent = e.message;
+        document.getElementById('cat-label').textContent = 'Error'
+        document.getElementById('amount').textContent = '—'
+        document.getElementById('month-label').classList.add('error')
+        document.getElementById('month-label').textContent = e.message
+      }
+    }
+
+    function renderTransactions(data) {
+      const scroll = document.getElementById('txns-scroll')
+      const list = document.getElementById('txns')
+
+      // Merge transactions with monthly assignments, newest first.
+      // An assignment is dated the 1st of its month; on the same date, transactions sort above it.
+      const rows = [
+        ...(data.transactions ?? []).map(t => ({ kind: 'txn', ...t })),
+        ...(data.assignments ?? []).map(a => ({
+          kind: 'assign',
+          date: `${a.month}-01`,
+          amount: a.amount,
+        })),
+      ].sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1
+        return (a.kind === 'assign') - (b.kind === 'assign')
+      })
+
+      if (rows.length === 0) {
+        const p = document.createElement('p')
+        p.className = 'empty'
+        p.textContent = 'No transactions yet'
+        scroll.replaceWith(p)
+        return
+      }
+
+      for (const t of rows) {
+        const [y, m, d] = t.date.split('-').map(Number)
+        const dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })
+        const isAssign = t.kind === 'assign'
+
+        const li = document.createElement('li')
+        li.className = 'txn' + (isAssign ? ' assign' : '')
+
+        const main = document.createElement('div')
+        main.className = 'txn-main'
+
+        const payee = document.createElement('div')
+        payee.className = 'txn-payee'
+        payee.textContent = isAssign ? 'Budget assigned' : (t.payee || t.notes || 'Unknown')
+
+        const date = document.createElement('div')
+        date.className = 'txn-date'
+        date.textContent = dateStr
+
+        main.append(payee, date)
+
+        const amt = document.createElement('div')
+        amt.className = 'txn-amt' + (!isAssign && t.amount > 0 ? ' refund' : '')
+        const sign = t.amount > 0 ? '+' : t.amount < 0 ? '-' : ''
+        amt.textContent = sign + '$' + formatMoney(t.amount)
+
+        li.append(main, amt)
+        list.append(li)
       }
     }
 
     load();
   </script>
 </body>
+
 </html>
