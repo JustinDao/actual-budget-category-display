@@ -7,8 +7,8 @@ export const maxDuration = 60
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
 
-// Safety cap on how many transactions get stored. The true count is stored too.
-const MAX_STORED = 200
+// Rolling window: the most recent N transactions in the category, regardless of month
+const TRANSACTION_LIMIT = 50
 
 async function upstashSet(key, value) {
   const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
@@ -27,9 +27,19 @@ function currentMonthPT() {
     year: 'numeric',
     month: '2-digit',
   }).formatToParts(new Date())
-  const y = parts.find((p) => p.type === 'year').value
-  const m = parts.find((p) => p.type === 'month').value
+  const y = parts.find(p => p.type === 'year').value
+  const m = parts.find(p => p.type === 'month').value
   return `${y}-${m}`
+}
+
+// How many months back to look for assigned (budgeted) amounts
+const MAX_ASSIGNMENT_MONTHS = 12
+
+// 'YYYY-MM' plus/minus N months
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
 export async function GET(request) {
@@ -60,26 +70,24 @@ export async function GET(request) {
     const targetName = process.env.BUDGET_CATEGORY_NAME
 
     const category = budgetMonth.categoryGroups
-      .flatMap((g) => g.categories)
-      .find((c) => (targetId ? c.id === targetId : c.name === targetName))
+      .flatMap(g => g.categories)
+      .find(c => (targetId ? c.id === targetId : c.name === targetName))
 
     if (!category) {
       return Response.json({ error: 'Category not found' }, { status: 404 })
     }
 
-    // Transactions in this category for the current month, newest first
+    // The most recent transactions in this category, newest first
     const { data: rows } = await api.runQuery(
       api
         .q('transactions')
-        .filter({
-          category: category.id,
-          date: { $transform: '$month', $eq: month },
-        })
+        .filter({ category: category.id })
         .select(['id', 'date', 'amount', 'payee.name', 'notes'])
-        .orderBy({ date: 'desc' }),
+        .orderBy({ date: 'desc' })
+        .limit(TRANSACTION_LIMIT)
     )
 
-    const transactions = rows.slice(0, MAX_STORED).map((t) => ({
+    const transactions = rows.map(t => ({
       id: t.id,
       date: t.date, // 'YYYY-MM-DD'
       amount: api.utils.integerToAmount(t.amount), // negative = spending, positive = refund
@@ -87,12 +95,33 @@ export async function GET(request) {
       notes: t.notes ?? null,
     }))
 
+    // Assigned (budgeted) amount per month, from the oldest listed transaction's month to now
+    const oldestMonth = transactions.length
+      ? transactions[transactions.length - 1].date.slice(0, 7)
+      : month
+    const earliestAllowed = shiftMonth(month, -(MAX_ASSIGNMENT_MONTHS - 1))
+    const startMonth = oldestMonth > earliestAllowed ? oldestMonth : earliestAllowed
+
+    const assignments = []
+    for (let m = startMonth; m <= month; m = shiftMonth(m, 1)) {
+      try {
+        const bm = m === month ? budgetMonth : await api.getBudgetMonth(m)
+        const cat = bm.categoryGroups
+          .flatMap(g => g.categories)
+          .find(c => c.id === category.id)
+        const amount = cat ? api.utils.integerToAmount(cat.budgeted) : 0
+        if (amount !== 0) assignments.push({ month: m, amount })
+      } catch (err) {
+        console.error(`getBudgetMonth(${m}) failed:`, err.message)
+      }
+    }
+
     const payload = {
       category: category.name,
       balance: api.utils.integerToAmount(category.balance),
       month,
       transactions,
-      transactionCount: rows.length, // true total, even if the stored list was capped
+      assignments,
       updatedAt: new Date().toISOString(),
     }
 
@@ -103,7 +132,7 @@ export async function GET(request) {
       category: payload.category,
       balance: payload.balance,
       month: payload.month,
-      transactionCount: payload.transactionCount,
+      transactionCount: transactions.length,
       updatedAt: payload.updatedAt,
     })
   } catch (err) {
@@ -113,6 +142,6 @@ export async function GET(request) {
     // Always shut down the API, success or failure
     try {
       await api.shutdown()
-    } catch {}
+    } catch { }
   }
 }
