@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@actual-app/api": "^26.11.0"
+    "@actual-app/api": "^26.11.0",
+    "plaid": "^50.0.0"
   }
 }
