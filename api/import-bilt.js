@@ -1,6 +1,6 @@
 import * as api from '@actual-app/api'
-import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
 import { mkdirSync } from 'fs'
+import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -180,7 +180,7 @@ export async function GET(request) {
     await api.sync()
 
     // Only advance the cursor after Actual has the data, so a failed run just retries
-    await saveCursor(nextCursor)
+    if (nextCursor) await saveCursor(nextCursor)
 
     return Response.json({
       ok: true,
@@ -199,7 +199,7 @@ export async function GET(request) {
     if (initialized) {
       try {
         await api.shutdown()
-      } catch {}
+      } catch { }
     }
   }
 }
