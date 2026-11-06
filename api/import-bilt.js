@@ -5,9 +5,22 @@ import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// "Bilt Palladium" account in Actual
-const ACTUAL_ACCOUNT_ID =
-  process.env.BILT_ACTUAL_ACCOUNT_ID || 'fb530a42-7007-4168-a9ca-184a647cf356'
+// Each budget file on the Pikapod that should receive the Bilt Palladium transactions.
+// Account IDs are per budget file, so each target has its own.
+const TARGETS = [
+  {
+    name: 'main',
+    syncId: process.env.ACTUAL_SYNC_ID,
+    accountId: process.env.BILT_ACTUAL_ACCOUNT_ID || 'fb530a42-7007-4168-a9ca-184a647cf356',
+    encryptionPassword: process.env.ACTUAL_ENCRYPTION_PASSWORD, // undefined if not encrypted
+  },
+  {
+    name: 'joint',
+    syncId: process.env.ACTUAL_SYNC_ID_2,
+    accountId: process.env.BILT_ACTUAL_ACCOUNT_ID_2 || '4cc17816-a2e1-41af-9d3b-bab011eed122',
+    encryptionPassword: undefined, // this file has no end-to-end encryption
+  },
+]
 
 // Optional: restrict to one Plaid account_id if the Item ever exposes more than the card
 const PLAID_ACCOUNT_FILTER = process.env.PLAID_ACCOUNT_ID || null
@@ -36,7 +49,7 @@ async function getCursor() {
   const { result } = await res.json()
   if (!result) return null
   try {
-    return JSON.parse(result).cursor ?? null
+    return JSON.parse(result).cursor || null
   } catch {
     return null
   }
@@ -85,9 +98,9 @@ async function pullFromPlaid(startCursor) {
 
 // Plaid: positive = money out of the account (a card purchase), negative = money in
 // (payment/refund). Actual: negative = spending. So flip the sign. Actual wants integer cents.
-function toActual(t) {
+function toActual(t, accountId) {
   return {
-    account: ACTUAL_ACCOUNT_ID,
+    account: accountId,
     date: t.date, // 'YYYY-MM-DD'
     amount: -Math.round(t.amount * 100),
     payee_name: t.merchant_name || t.name,
@@ -108,6 +121,7 @@ export async function GET(request) {
     'ACTUAL_SERVER_URL',
     'ACTUAL_PASSWORD',
     'ACTUAL_SYNC_ID',
+    'BILT_ACTUAL_ACCOUNT_ID_2',
     'PLAID_CLIENT_ID',
     'PLAID_SECRET',
     'PLAID_ACCESS_TOKEN',
@@ -130,7 +144,7 @@ export async function GET(request) {
     const inScope = (t) => !PLAID_ACCOUNT_FILTER || t.account_id === PLAID_ACCOUNT_FILTER
 
     // Skip pending: they get a different transaction_id once posted, which would duplicate.
-    const toImport = [...added, ...modified].filter((t) => inScope(t) && !t.pending).map(toActual)
+    const posted = [...added, ...modified].filter((t) => inScope(t) && !t.pending)
     const toRemove = removed.filter(inScope)
 
     if (dry) {
@@ -138,9 +152,10 @@ export async function GET(request) {
         ok: true,
         dry: true,
         startedFromCursor: Boolean(startCursor),
-        wouldImport: toImport.length,
+        targets: TARGETS.map((t) => t.name),
+        wouldImport: posted.length,
         wouldRemove: toRemove.length,
-        sample: toImport.slice(0, 10),
+        sample: posted.slice(0, 10).map((t) => toActual(t, TARGETS[0].accountId)),
       })
     }
 
@@ -152,43 +167,50 @@ export async function GET(request) {
     })
     initialized = true
 
-    await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
-      password: process.env.ACTUAL_ENCRYPTION_PASSWORD,
-    })
+    const results = []
+    for (const target of TARGETS) {
+      await api.downloadBudget(target.syncId, { password: target.encryptionPassword })
 
-    let result = { added: [], updated: [], errors: [] }
-    if (toImport.length) {
-      result = await api.importTransactions(ACTUAL_ACCOUNT_ID, toImport)
-    }
-
-    // Plaid says these were removed (e.g. a posted transaction that got reversed)
-    let deleted = 0
-    for (const r of toRemove) {
-      const { data } = await api.runQuery(
-        api
-          .q('transactions')
-          .filter({ account: ACTUAL_ACCOUNT_ID, imported_id: r.transaction_id })
-          .select(['id'])
-      )
-      for (const row of data) {
-        await api.deleteTransaction(row.id)
-        deleted++
+      let result = { added: [], updated: [], errors: [] }
+      if (posted.length) {
+        result = await api.importTransactions(
+          target.accountId,
+          posted.map((t) => toActual(t, target.accountId))
+        )
       }
+
+      // Plaid says these were removed (e.g. a posted transaction that got reversed)
+      let deleted = 0
+      for (const r of toRemove) {
+        const { data } = await api.runQuery(
+          api
+            .q('transactions')
+            .filter({ account: target.accountId, imported_id: r.transaction_id })
+            .select(['id'])
+        )
+        for (const row of data) {
+          await api.deleteTransaction(row.id)
+          deleted++
+        }
+      }
+
+      // Push this budget's changes to the server before loading the next one
+      await api.sync()
+
+      results.push({
+        target: target.name,
+        imported: result.added?.length ?? 0,
+        updated: result.updated?.length ?? 0,
+        deleted,
+        errors: result.errors ?? [],
+      })
     }
 
-    // Push changes to the server
-    await api.sync()
-
-    // Only advance the cursor after Actual has the data, so a failed run just retries
+    // Only advance the cursor after EVERY budget has the data. If one target fails we throw
+    // before this line, the next run retries both, and already-imported rows dedupe.
     if (nextCursor) await saveCursor(nextCursor)
 
-    return Response.json({
-      ok: true,
-      imported: result.added?.length ?? 0,
-      updated: result.updated?.length ?? 0,
-      deleted,
-      errors: result.errors ?? [],
-    })
+    return Response.json({ ok: true, results })
   } catch (err) {
     console.error(err?.response?.data || err)
     return Response.json(
