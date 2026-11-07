@@ -1,6 +1,7 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
+import { pingHealthcheck } from './healthchecks.js'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -130,6 +131,7 @@ export async function GET(request) {
   ]
   const missing = required.filter((k) => !process.env[k])
   if (missing.length) {
+    await pingHealthcheck(process.env.HEALTHCHECKS_BILT_URL, 'failure', 'Bilt sync')
     return Response.json({ error: `Missing env vars: ${missing.join(', ')}` }, { status: 500 })
   }
 
@@ -206,13 +208,21 @@ export async function GET(request) {
       })
     }
 
+    const hasErrors = results.some((result) => result.errors.length > 0)
+    if (hasErrors) {
+      await pingHealthcheck(process.env.HEALTHCHECKS_BILT_URL, 'failure', 'Bilt sync')
+      return Response.json({ ok: false, results }, { status: 500 })
+    }
+
     // Only advance the cursor after EVERY budget has the data. If one target fails we throw
     // before this line, the next run retries both, and already-imported rows dedupe.
     if (nextCursor) await saveCursor(nextCursor)
 
+    await pingHealthcheck(process.env.HEALTHCHECKS_BILT_URL, 'success', 'Bilt sync')
     return Response.json({ ok: true, results })
   } catch (err) {
     console.error(err?.response?.data || err)
+    await pingHealthcheck(process.env.HEALTHCHECKS_BILT_URL, 'failure', 'Bilt sync')
     return Response.json(
       { error: err?.response?.data?.error_message || err.message },
       { status: 500 }

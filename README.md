@@ -23,6 +23,16 @@ Add these in your Vercel project settings → Environment Variables:
 | `UPSTASH_REDIS_REST_URL` | From Upstash dashboard |
 | `UPSTASH_REDIS_REST_TOKEN` | From Upstash dashboard |
 | `CRON_SECRET` | Any random string, e.g. `openssl rand -hex 16` |
+| `HEALTHCHECKS_ACTUAL_URL` | Healthchecks.io ping URL shared by `/api/sync` and `/api/reconcile-investments` |
+| `HEALTHCHECKS_BILT_URL` | Healthchecks.io ping URL for `/api/import-bilt` |
+
+Create two checks in Healthchecks.io and add each check's ping URL as the matching
+environment variable. Treat these URLs as secrets. The Actual check receives
+success pings from either Actual job and failure pings when either job fails; the
+Bilt check is independent. Healthchecks sends alerts when a check changes to Down,
+so repeated failures while it remains Down do not send another state-change alert.
+A success from either Actual job returns the shared check to Up, so this grouping
+does not independently detect if only one of the two Actual jobs was skipped.
 
 ### 3. vercel.json
 Update the `secret` query param in vercel.json to match your `CRON_SECRET`.

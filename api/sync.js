@@ -1,5 +1,6 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
+import { pingHealthcheck } from './healthchecks.js'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -74,6 +75,7 @@ export async function GET(request) {
       .find(c => (targetId ? c.id === targetId : c.name === targetName))
 
     if (!category) {
+      await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
       return Response.json({ error: 'Category not found' }, { status: 404 })
     }
 
@@ -103,6 +105,7 @@ export async function GET(request) {
     const startMonth = oldestMonth > earliestAllowed ? oldestMonth : earliestAllowed
 
     const assignments = []
+    const assignmentErrors = []
     for (let m = startMonth; m <= month; m = shiftMonth(m, 1)) {
       try {
         const bm = m === month ? budgetMonth : await api.getBudgetMonth(m)
@@ -113,6 +116,7 @@ export async function GET(request) {
         if (amount !== 0) assignments.push({ month: m, amount })
       } catch (err) {
         console.error(`getBudgetMonth(${m}) failed:`, err.message)
+        assignmentErrors.push(m)
       }
     }
 
@@ -127,16 +131,25 @@ export async function GET(request) {
 
     await upstashSet('budget:amount', payload)
 
+    const hasErrors = assignmentErrors.length > 0
+    await pingHealthcheck(
+      process.env.HEALTHCHECKS_ACTUAL_URL,
+      hasErrors ? 'failure' : 'success',
+      'Actual sync',
+    )
+
     return Response.json({
-      ok: true,
+      ok: !hasErrors,
       category: payload.category,
       balance: payload.balance,
       month: payload.month,
       transactionCount: transactions.length,
+      assignmentErrors,
       updatedAt: payload.updatedAt,
-    })
+    }, { status: hasErrors ? 500 : 200 })
   } catch (err) {
     console.error(err)
+    await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
     return Response.json({ error: err.message }, { status: 500 })
   } finally {
     // Always shut down the API, success or failure

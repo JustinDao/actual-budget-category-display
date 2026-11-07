@@ -1,5 +1,6 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
+import { pingHealthcheck } from './healthchecks.js'
 
 const RECONCILIATION_PAYEE = 'Automatic Investment Reconciliation'
 const RECONCILIATION_NOTE = 'Automatically generated after bank sync'
@@ -22,6 +23,7 @@ export async function GET(request) {
   const required = ['ACTUAL_SERVER_URL', 'ACTUAL_PASSWORD', 'ACTUAL_SYNC_ID']
   const missing = required.filter((key) => !process.env[key])
   if (missing.length) {
+    await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
     return Response.json({ error: `Missing required env vars: ${missing.join(', ')}` }, { status: 500 })
   }
 
@@ -125,7 +127,17 @@ export async function GET(request) {
 
     await api.shutdown()
 
-    return Response.json({ ok: true, syncErrors, results })
+    const hasErrors = syncErrors.length > 0 || results.some((result) => result.status === 'error')
+    await pingHealthcheck(
+      process.env.HEALTHCHECKS_ACTUAL_URL,
+      hasErrors ? 'failure' : 'success',
+      'Actual sync',
+    )
+
+    return Response.json(
+      { ok: !hasErrors, syncErrors, results },
+      { status: hasErrors ? 500 : 200 },
+    )
   } catch (err) {
     console.error(err)
     // Make sure we always shut down the api even on error
@@ -134,6 +146,7 @@ export async function GET(request) {
         await api.shutdown()
       } catch {}
     }
+    await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
     return Response.json({ error: err.message }, { status: 500 })
   }
 }
