@@ -3,7 +3,7 @@ import { build } from 'esbuild';
 await Promise.all([
   build({
     entryPoints: ['src/client.ts'],
-    outfile: 'public/client.js',
+    outfile: 'client.js',
     bundle: true,
     platform: 'browser',
     target: 'es2022',
