@@ -3,6 +3,31 @@
 Fetches a budgeted amount from Actual Budget (self-hosted, E2E encrypted) once daily
 and stores it in Upstash Redis. Exposes a public read endpoint for other apps.
 
+## Development
+
+Requires Node.js 22 or newer.
+
+```bash
+npm install
+npm run check
+```
+
+`npm run check` type-checks all TypeScript and builds the browser bundles. The generated
+JavaScript is written to ignored build output; application source remains TypeScript.
+
+Useful local scripts:
+
+```bash
+npm run run:script -- plaid-debug
+npm run run:script -- plaid-link
+npm run run:script -- run-local
+```
+
+The common `run:script` command loads `.env.local` for each script. Plaid Link builds its
+browser bundle before starting. `run-local` uses dry-run mode by default; set `LIVE=1`
+to perform the import. The shorter `npm run plaid-debug`, `npm run plaid-link`, and
+`npm run run-local` aliases are also available.
+
 ## Setup
 
 ### 1. Upstash
@@ -18,6 +43,7 @@ Add these in your Vercel project settings → Environment Variables:
 | `ACTUAL_SERVER_URL` | Your Pikapods URL, e.g. `https://actual-xxxxx.pikapods.com` |
 | `ACTUAL_PASSWORD` | Your Actual server password |
 | `ACTUAL_SYNC_ID` | Settings → Advanced → Sync ID in Actual |
+| `ACTUAL_SYNC_ID_2` | Sync ID for the second budget file used by the Bilt import |
 | `ACTUAL_ENCRYPTION_PASSWORD` | Your E2E encryption password |
 | `BUDGET_CATEGORY_NAME` | Exact category name to track, e.g. `Groceries` |
 | `UPSTASH_REDIS_REST_URL` | From Upstash dashboard |
@@ -25,6 +51,7 @@ Add these in your Vercel project settings → Environment Variables:
 | `CRON_SECRET` | Any random string, e.g. `openssl rand -hex 16` |
 | `HEALTHCHECKS_ACTUAL_URL` | Healthchecks.io ping URL shared by `/api/sync` and `/api/reconcile-investments` |
 | `HEALTHCHECKS_BILT_URL` | Healthchecks.io ping URL for `/api/import-bilt` |
+| `BILT_ACTUAL_ACCOUNT_ID_2` | Account ID in the second Actual budget file for Bilt transactions |
 
 Create two checks in Healthchecks.io and add each check's ping URL as the matching
 environment variable. Treat these URLs as secrets. The Actual check receives

@@ -1,6 +1,7 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
 import { pingHealthcheck } from './healthchecks.js'
+import { errorMessage } from '../lib/errors.js'
 
 const RECONCILIATION_PAYEE = 'Automatic Investment Reconciliation'
 const RECONCILIATION_NOTE = 'Automatically generated after bank sync'
@@ -10,7 +11,7 @@ function today() {
   return now.toISOString().slice(0, 10)
 }
 
-export async function GET(request) {
+export async function GET(request: Request): Promise<Response> {
   // Protect this endpoint with a secret so randos can't trigger it
   const authHeader = request.headers.get('authorization')
   const hasSecret = new URL(request.url).searchParams.get('secret') === process.env.CRON_SECRET
@@ -34,12 +35,12 @@ export async function GET(request) {
 
     await api.init({
       dataDir: '/tmp/actual-cache',
-      serverURL: process.env.ACTUAL_SERVER_URL,
-      password: process.env.ACTUAL_PASSWORD,
+      serverURL: process.env.ACTUAL_SERVER_URL!,
+      password: process.env.ACTUAL_PASSWORD!,
     })
     initialized = true
 
-    await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
+    await api.downloadBudget(process.env.ACTUAL_SYNC_ID!, {
       password: process.env.ACTUAL_ENCRYPTION_PASSWORD,
     })
 
@@ -51,9 +52,9 @@ export async function GET(request) {
     for (const account of openAccounts) {
       try {
         await api.runBankSync({ accountId: account.id })
-      } catch (err) {
-        console.error(`Bank sync failed for ${account.name}:`, err.message)
-        syncErrors.push({ account: account.name, error: err.message })
+      } catch (error) {
+        console.error(`Bank sync failed for ${account.name}:`, errorMessage(error))
+        syncErrors.push({ account: account.name, error: errorMessage(error) })
       }
     }
 
@@ -79,6 +80,7 @@ export async function GET(request) {
     for (const account of investmentAccounts) {
       try {
         const bankBalance = account.balance_current
+        if (bankBalance == null) continue
         const ledgerBalance = await api.getAccountBalance(account.id)
         const diff = bankBalance - ledgerBalance
 
@@ -90,7 +92,10 @@ export async function GET(request) {
         // Avoid duplicate reconciliation if this runs more than once today
         const todaysTransactions = await api.getTransactions(account.id, today(), today())
         const alreadyCreated = todaysTransactions.some(
-          (tx) => tx.payee_name === RECONCILIATION_PAYEE && tx.notes === RECONCILIATION_NOTE,
+          (tx) =>
+            'payee_name' in tx &&
+            tx.payee_name === RECONCILIATION_PAYEE &&
+            tx.notes === RECONCILIATION_NOTE,
         )
 
         if (alreadyCreated) {
@@ -100,7 +105,6 @@ export async function GET(request) {
 
         await api.addTransactions(account.id, [
           {
-            account: account.id,
             date: today(),
             amount: diff,
             payee_name: RECONCILIATION_PAYEE,
@@ -116,9 +120,9 @@ export async function GET(request) {
         })
 
         console.log(`${account.name}: ${(diff / 100).toFixed(2)} adjustment created`)
-      } catch (err) {
-        console.error(`Reconciliation failed for ${account.name}:`, err.message)
-        results.push({ account: account.name, status: 'error', error: err.message })
+      } catch (error) {
+        console.error(`Reconciliation failed for ${account.name}:`, errorMessage(error))
+        results.push({ account: account.name, status: 'error', error: errorMessage(error) })
       }
     }
 
@@ -138,8 +142,8 @@ export async function GET(request) {
       { ok: !hasErrors, syncErrors, results },
       { status: hasErrors ? 500 : 200 },
     )
-  } catch (err) {
-    console.error(err)
+  } catch (error) {
+    console.error(error)
     // Make sure we always shut down the api even on error
     if (initialized) {
       try {
@@ -147,6 +151,6 @@ export async function GET(request) {
       } catch {}
     }
     await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
-    return Response.json({ error: err.message }, { status: 500 })
+    return Response.json({ error: errorMessage(error) }, { status: 500 })
   }
 }

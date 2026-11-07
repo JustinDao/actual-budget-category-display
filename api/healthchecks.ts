@@ -1,4 +1,8 @@
-export async function pingHealthcheck(url, outcome, jobName) {
+export async function pingHealthcheck(
+  url: string | undefined,
+  outcome: 'success' | 'failure',
+  jobName: string,
+): Promise<void> {
   if (!url) return
 
   const endpoint = `${url.replace(/\/+$/, '')}${outcome === 'failure' ? '/fail' : ''}`
@@ -11,7 +15,7 @@ export async function pingHealthcheck(url, outcome, jobName) {
     if (!response.ok) {
       console.error(`Healthchecks ${jobName} ping failed with status ${response.status}`)
     }
-  } catch (err) {
-    console.error(`Healthchecks ${jobName} ping failed:`, err)
+  } catch (error) {
+    console.error(`Healthchecks ${jobName} ping failed:`, error)
   }
 }

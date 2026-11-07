@@ -1,13 +1,16 @@
 // One-time helper: connect your Bilt card via Plaid Link and print the access token.
 //
-//   PLAID_CLIENT_ID=... PLAID_SECRET=... node scripts/plaid-link.mjs
+//   PLAID_CLIENT_ID=... PLAID_SECRET=... npm run plaid-link
 //
 // Then open http://localhost:3000, pick "Bilt Rewards", log in. The access token and
 // account IDs are printed in this terminal. Put the token in Vercel as PLAID_ACCESS_TOKEN.
 // Keep it safe: on a Trial plan every Item you create counts against your 10-Item cap.
 
-import http from 'node:http'
-import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
+import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Configuration, PlaidApi, PlaidEnvironments, CountryCode, Products } from 'plaid'
 
 const { PLAID_CLIENT_ID, PLAID_SECRET } = process.env
 if (!PLAID_CLIENT_ID || !PLAID_SECRET) {
@@ -24,36 +27,40 @@ const plaid = new PlaidApi(
   })
 )
 
-const page = (linkToken) => `<!doctype html>
+const clientScriptPath = resolve(dirname(fileURLToPath(import.meta.url)), '../.build/plaid-link-client.js')
+const clientScript = await readFile(clientScriptPath, 'utf8')
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+const page = (linkToken: string) => `<!doctype html>
 <meta charset="utf-8"><title>Connect Bilt</title>
-<body style="font-family:system-ui;padding:2rem">
+<body data-link-token="${escapeHtml(linkToken)}" style="font-family:system-ui;padding:2rem">
 <p id="msg">Opening Plaid Link…</p>
 <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
-<script>
-  const msg = document.getElementById('msg')
-  const handler = Plaid.create({
-    token: ${JSON.stringify(linkToken)},
-    onSuccess: async (public_token) => {
-      const r = await fetch('/exchange', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ public_token }),
-      })
-      msg.textContent = r.ok ? 'Connected. Check your terminal for the access token.' : 'Exchange failed. Check your terminal.'
-    },
-    onExit: (err) => { msg.textContent = err ? 'Link exited: ' + (err.error_message || err.error_code) : 'Closed.' },
-  })
-  handler.open()
-</script>`
+<script src="/client.js" defer></script>`
 
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/') {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+
+    if (req.method === 'GET' && url.pathname === '/client.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' })
+      res.end(clientScript)
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/') {
       const { data } = await plaid.linkTokenCreate({
         user: { client_user_id: 'justin-actual-budget' },
         client_name: 'Actual Budget Bilt Import',
-        products: ['transactions'],
-        country_codes: ['US'],
+        products: [Products.Transactions],
+        country_codes: [CountryCode.Us],
         language: 'en',
         transactions: { days_requested: 730 }, // history available on first sync
       })
@@ -62,12 +69,23 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    if (req.method === 'POST' && req.url === '/exchange') {
-      let body = ''
-      for await (const chunk of req) body += chunk
-      const { public_token } = JSON.parse(body)
+    if (req.method === 'POST' && url.pathname === '/exchange') {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (
+        typeof body !== 'object' ||
+        body === null ||
+        !('public_token' in body) ||
+        typeof body.public_token !== 'string'
+      ) {
+        throw new Error('Request body must include a public_token')
+      }
+      const publicToken = body.public_token
 
-      const { data } = await plaid.itemPublicTokenExchange({ public_token })
+      const { data } = await plaid.itemPublicTokenExchange({ public_token: publicToken })
       const { data: accts } = await plaid.accountsGet({ access_token: data.access_token })
 
       console.log('\n=== SAVE THESE ===')
@@ -85,7 +103,7 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(404).end()
   } catch (err) {
-    console.error(err?.response?.data || err)
+    console.error(err)
     res.writeHead(500).end('error')
   }
 })

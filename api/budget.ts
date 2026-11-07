@@ -1,7 +1,9 @@
+import { errorMessage } from '../lib/errors.js';
+
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-async function upstashGet(key) {
+async function upstashGet(key: string): Promise<unknown> {
   const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
     headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
   });
@@ -16,7 +18,7 @@ export async function GET() {
       return Response.json({ error: 'No data yet — run /api/sync first' }, { status: 404 });
     }
     return Response.json(value);
-  } catch (err) {
-    return Response.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    return Response.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

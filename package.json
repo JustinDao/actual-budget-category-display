@@ -2,8 +2,23 @@
   "name": "actual-budget-sync",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "build": "npm run typecheck && tsx scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run build",
+    "run:script": "node --env-file=.env.local --import tsx scripts/run-script.ts",
+    "plaid-debug": "npm run run:script -- plaid-debug",
+    "plaid-link": "npm run run:script -- plaid-link",
+    "run-local": "npm run run:script -- run-local"
+  },
   "dependencies": {
     "@actual-app/api": "^26.11.0",
     "plaid": "^50.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
