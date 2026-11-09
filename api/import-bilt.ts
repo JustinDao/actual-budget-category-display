@@ -96,6 +96,8 @@ async function pullFromPlaid(startCursor: string | null): Promise<{
           access_token: process.env.PLAID_ACCESS_TOKEN!,
           cursor,
           count: 500,
+          // Plaid omits the raw bank descriptor unless asked; we store it in notes
+          options: { include_original_description: true },
         })
         added.push(...data.added)
         modified.push(...data.modified)
@@ -135,6 +137,9 @@ function toActual(t: Transaction, accountId: string) {
     amount: -Math.round(t.amount * 100),
     payee_name: t.merchant_name || t.name,
     imported_payee: t.name,
+    // Raw bank descriptor (e.g. "SAFEWAY #1551 SEATTLE WA"), matching the notes on
+    // SimpleFIN-synced accounts so notes-based rules behave the same everywhere
+    notes: t.original_description ?? t.name,
     imported_id: t.transaction_id, // stable ID -> Actual dedupes on re-import
     cleared: true,
   }
