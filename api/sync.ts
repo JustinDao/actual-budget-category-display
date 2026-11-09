@@ -1,7 +1,7 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
-import { pingHealthcheck } from './healthchecks.js'
 import { errorMessage } from '../lib/errors.js'
+import { pingHealthcheck } from './healthchecks.js'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -45,25 +45,51 @@ interface BudgetCategory {
   balance: number
 }
 
+// Categories we've already warned about, so the 12-month assignment loop doesn't repeat itself
+const warnedCategories = new Set<string>()
+
+function toBudgetCategory(category: Record<string, unknown>): BudgetCategory | null {
+  if (
+    typeof category.id !== 'string' ||
+    typeof category.name !== 'string' ||
+    typeof category.budgeted !== 'number' ||
+    typeof category.balance !== 'number'
+  ) {
+    return null
+  }
+  return {
+    id: category.id,
+    name: category.name,
+    budgeted: category.budgeted,
+    balance: category.balance,
+  }
+}
+
+// getBudgetMonth can return categories that have no numeric budgeted/balance (e.g. income
+// categories). Skip those instead of failing the whole sync, and log their shape once so a
+// genuinely unexpected category is visible. Only field TYPES are logged, never amounts.
 function getBudgetCategories(
   groups: Array<Record<string, unknown> & { categories?: Record<string, unknown>[] }>,
 ): BudgetCategory[] {
   return groups.flatMap((group) =>
-    (group.categories ?? []).map((category) => {
-      if (
-        typeof category.id !== 'string' ||
-        typeof category.name !== 'string' ||
-        typeof category.budgeted !== 'number' ||
-        typeof category.balance !== 'number'
-      ) {
-        throw new Error('Unexpected Actual budget category')
+    (group.categories ?? []).flatMap((category) => {
+      const parsed = toBudgetCategory(category)
+      if (parsed) return [parsed]
+
+      const key = String(category.id)
+      if (!warnedCategories.has(key)) {
+        warnedCategories.add(key)
+        console.warn(
+          'Skipping category without numeric budgeted/balance:',
+          JSON.stringify({
+            group: group.name,
+            groupIsIncome: group.is_income,
+            category: category.name,
+            fieldTypes: Object.fromEntries(Object.entries(category).map(([field, value]) => [field, typeof value])),
+          }),
+        )
       }
-      return {
-        id: category.id,
-        name: category.name,
-        budgeted: category.budgeted,
-        balance: category.balance,
-      }
+      return []
     }),
   )
 }
@@ -139,8 +165,9 @@ export async function GET(request: Request): Promise<Response> {
     const targetId = process.env.BUDGET_CATEGORY_ID
     const targetName = process.env.BUDGET_CATEGORY_NAME
 
-    const category = getBudgetCategories(budgetMonth.categoryGroups)
-      .find((candidate) => (targetId ? candidate.id === targetId : candidate.name === targetName))
+    const category = getBudgetCategories(budgetMonth.categoryGroups).find((candidate) =>
+      targetId ? candidate.id === targetId : candidate.name === targetName,
+    )
 
     if (!category) {
       await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
@@ -154,11 +181,11 @@ export async function GET(request: Request): Promise<Response> {
         .filter({ category: category.id })
         .select(['id', 'date', 'amount', 'payee.name', 'notes'])
         .orderBy({ date: 'desc' })
-        .limit(TRANSACTION_LIMIT)
+        .limit(TRANSACTION_LIMIT),
     )
     const rows = getTransactionRows(queryResult)
 
-    const transactions = rows.map(t => ({
+    const transactions = rows.map((t) => ({
       id: t.id,
       date: t.date, // 'YYYY-MM-DD'
       amount: api.utils.integerToAmount(t.amount), // negative = spending, positive = refund
@@ -167,9 +194,7 @@ export async function GET(request: Request): Promise<Response> {
     }))
 
     // Assigned (budgeted) amount per month, from the oldest listed transaction's month to now
-    const oldestMonth = transactions.length
-      ? transactions[transactions.length - 1].date.slice(0, 7)
-      : month
+    const oldestMonth = transactions.length ? transactions[transactions.length - 1].date.slice(0, 7) : month
     const earliestAllowed = shiftMonth(month, -(MAX_ASSIGNMENT_MONTHS - 1))
     const startMonth = oldestMonth > earliestAllowed ? oldestMonth : earliestAllowed
 
@@ -178,15 +203,13 @@ export async function GET(request: Request): Promise<Response> {
     for (let m = startMonth; m <= month; m = shiftMonth(m, 1)) {
       try {
         const bm = m === month ? budgetMonth : await api.getBudgetMonth(m)
-        const cat = getBudgetCategories(bm.categoryGroups)
-          .find((candidate) => candidate.id === category.id)
+        const cat = getBudgetCategories(bm.categoryGroups).find((candidate) => candidate.id === category.id)
         const amount = cat ? api.utils.integerToAmount(cat.budgeted) : 0
         if (amount !== 0) assignments.push({ month: m, amount })
       } catch (err) {
         console.error(`getBudgetMonth(${m}) failed:`, errorMessage(err))
         assignmentErrors.push(m)
       }
-
     }
 
     const payload = {
@@ -201,21 +224,20 @@ export async function GET(request: Request): Promise<Response> {
     await upstashSet('budget:amount', payload)
 
     const hasErrors = assignmentErrors.length > 0
-    await pingHealthcheck(
-      process.env.HEALTHCHECKS_ACTUAL_URL,
-      hasErrors ? 'failure' : 'success',
-      'Actual sync',
-    )
+    await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, hasErrors ? 'failure' : 'success', 'Actual sync')
 
-    return Response.json({
-      ok: !hasErrors,
-      category: payload.category,
-      balance: payload.balance,
-      month: payload.month,
-      transactionCount: transactions.length,
-      assignmentErrors,
-      updatedAt: payload.updatedAt,
-    }, { status: hasErrors ? 500 : 200 })
+    return Response.json(
+      {
+        ok: !hasErrors,
+        category: payload.category,
+        balance: payload.balance,
+        month: payload.month,
+        transactionCount: transactions.length,
+        assignmentErrors,
+        updatedAt: payload.updatedAt,
+      },
+      { status: hasErrors ? 500 : 200 },
+    )
   } catch (error) {
     console.error(error)
     await pingHealthcheck(process.env.HEALTHCHECKS_ACTUAL_URL, 'failure', 'Actual sync')
@@ -224,6 +246,6 @@ export async function GET(request: Request): Promise<Response> {
     // Always shut down the API, success or failure
     try {
       await api.shutdown()
-    } catch { }
+    } catch {}
   }
 }
