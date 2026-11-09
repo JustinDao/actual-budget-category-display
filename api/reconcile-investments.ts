@@ -11,6 +11,22 @@ function today() {
   return now.toISOString().slice(0, 10)
 }
 
+// Actual's bank sync throws an Error with a `code` property (e.g. ACCOUNT_NEEDS_ATTENTION when
+// the bank/aggregator connection needs the user to re-authenticate or is temporarily broken).
+// These are connection-health issues on the provider side, not failures of this job, so we
+// report them as warnings instead of failing the run.
+const NON_FATAL_SYNC_CODES = new Set(['ACCOUNT_NEEDS_ATTENTION'])
+
+function isNonFatalSyncError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    NON_FATAL_SYNC_CODES.has(error.code)
+  )
+}
+
 export async function GET(request: Request): Promise<Response> {
   // Protect this endpoint with a secret so randos can't trigger it
   const authHeader = request.headers.get('authorization')
@@ -49,12 +65,18 @@ export async function GET(request: Request): Promise<Response> {
 
     // Step 1: bank sync every open account, one at a time — don't let one failure kill the rest
     const syncErrors = []
+    const syncWarnings = []
     for (const account of openAccounts) {
       try {
         await api.runBankSync({ accountId: account.id })
       } catch (error) {
-        console.error(`Bank sync failed for ${account.name}:`, errorMessage(error))
-        syncErrors.push({ account: account.name, error: errorMessage(error) })
+        if (isNonFatalSyncError(error)) {
+          console.warn(`Bank sync needs attention for ${account.name}:`, errorMessage(error))
+          syncWarnings.push({ account: account.name, error: errorMessage(error) })
+        } else {
+          console.error(`Bank sync failed for ${account.name}:`, errorMessage(error))
+          syncErrors.push({ account: account.name, error: errorMessage(error) })
+        }
       }
     }
 
@@ -139,7 +161,7 @@ export async function GET(request: Request): Promise<Response> {
     )
 
     return Response.json(
-      { ok: !hasErrors, syncErrors, results },
+      { ok: !hasErrors, syncErrors, syncWarnings, results },
       { status: hasErrors ? 500 : 200 },
     )
   } catch (error) {
