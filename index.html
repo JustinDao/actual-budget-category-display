@@ -154,6 +154,133 @@
       margin-bottom: auto;
     }
 
+    [hidden] {
+      display: none !important;
+    }
+
+    .app-content {
+      display: contents;
+    }
+
+    .auth-gate {
+      margin: auto;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 380px;
+      background: #ffffff;
+      border: 1px solid #e8e6df;
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .auth-card__brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 6px;
+    }
+
+    .auth-card__brand h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #1a1a18;
+    }
+
+    .auth-card__brand p {
+      font-size: 0.85rem;
+      color: #888780;
+      line-height: 1.4;
+    }
+
+    .auth-card__field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .auth-card__field span {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #5f5e5a;
+    }
+
+    .auth-card__field input {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #d4d2c9;
+      background: #fafaf9;
+      color: #1a1a18;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+    }
+
+    .auth-card__field input:focus {
+      border-color: #185fa5;
+    }
+
+    .auth-card__error {
+      padding: 9px 12px;
+      border-radius: 8px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #a32d2d;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .auth-card__submit {
+      padding: 11px 16px;
+      border-radius: 10px;
+      border: none;
+      background: #185fa5;
+      color: #ffffff;
+      font-size: 0.92rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .auth-card__submit:hover {
+      background: #134b84;
+    }
+
+    .lock-btn {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid #e8e6df;
+      background: transparent;
+      color: #888780;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .lock-btn:hover {
+      color: #1a1a18;
+      border-color: #b4b2a9;
+    }
+
     @media (prefers-color-scheme: dark) {
       body {
         background: #1a1a18;
@@ -192,23 +319,99 @@
       .txn.assign .txn-amt {
         color: #85b7eb;
       }
+
+      .auth-card {
+        background: #222220;
+        border-color: #2c2c2a;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+
+      .auth-card__brand h1 {
+        color: #f1efe8;
+      }
+
+      .auth-card__brand p {
+        color: #888780;
+      }
+
+      .auth-card__field span {
+        color: #888780;
+      }
+
+      .auth-card__field input {
+        background: #1a1a18;
+        border-color: #3a3a37;
+        color: #f1efe8;
+      }
+
+      .auth-card__field input:focus {
+        border-color: #85b7eb;
+      }
+
+      .auth-card__error {
+        background: rgba(163, 45, 45, 0.18);
+        border-color: rgba(248, 113, 113, 0.35);
+        color: #f87171;
+      }
+
+      .lock-btn {
+        border-color: #2c2c2a;
+        color: #888780;
+      }
+
+      .lock-btn:hover {
+        color: #f1efe8;
+        border-color: #5f5e5a;
+      }
     }
   </style>
 </head>
 
 <body>
-  <div class="card">
-    <p class="label" id="cat-label">Loading</p>
-    <div class="amount-row">
-      <span class="currency">$</span>
-      <span class="amount" id="amount">—</span>
-    </div>
-    <p class="month" id="month-label"></p>
-    <p class="updated" id="updated-label"></p>
+  <div class="auth-gate" id="auth-gate" hidden>
+    <form class="auth-card" id="auth-form" novalidate>
+      <div class="auth-card__brand">
+        <h1>Budget</h1>
+        <p>Enter password to view your budget category</p>
+      </div>
+
+      <label class="auth-card__field">
+        <span>Password</span>
+        <input
+          id="auth-input"
+          type="password"
+          name="passwordInput"
+          placeholder="Enter password..."
+          autocomplete="current-password"
+          autofocus
+          required
+        />
+      </label>
+
+      <div class="auth-card__error" id="auth-error" role="alert" hidden></div>
+
+      <button type="submit" class="auth-card__submit">Unlock</button>
+    </form>
   </div>
 
-  <div class="txns-scroll" id="txns-scroll">
-    <ul class="txns" id="txns"></ul>
+  <div class="app-content" id="app-content" hidden>
+    <button type="button" class="lock-btn" id="lock-btn" title="Lock application" hidden>
+      Lock
+    </button>
+
+    <div class="card">
+      <p class="label" id="cat-label">Loading</p>
+      <div class="amount-row">
+        <span class="currency">$</span>
+        <span class="amount" id="amount">—</span>
+      </div>
+      <p class="month" id="month-label"></p>
+      <p class="updated" id="updated-label"></p>
+    </div>
+
+    <div class="txns-scroll" id="txns-scroll">
+      <ul class="txns" id="txns"></ul>
+    </div>
   </div>
 
   <script src="/client.js" defer></script>

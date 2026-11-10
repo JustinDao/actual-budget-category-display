@@ -52,6 +52,7 @@ Add these in your Vercel project settings → Environment Variables:
 | `HEALTHCHECKS_ACTUAL_URL` | Healthchecks.io ping URL shared by `/api/sync` and `/api/reconcile-investments` |
 | `HEALTHCHECKS_BILT_URL` | Healthchecks.io ping URL for `/api/import-bilt` |
 | `BILT_ACTUAL_ACCOUNT_ID_2` | Account ID in the second Actual budget file for Bilt transactions |
+| `APP_PASSWORD` | Password required to unlock the web UI and access `/api/budget` |
 
 Create two checks in Healthchecks.io and add each check's ping URL as the matching
 environment variable. Treat these URLs as secrets. The Actual check receives

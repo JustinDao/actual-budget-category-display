@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { errorMessage } from '../lib/errors.js';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
@@ -11,7 +12,16 @@ async function upstashGet(key: string): Promise<unknown> {
   return data.result ? JSON.parse(decodeURIComponent(data.result)) : null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const configuredPassword = (process.env.APP_PASSWORD || '').trim();
+  if (configuredPassword) {
+    const expectedHash = createHash('sha256').update(configuredPassword, 'utf8').digest('hex');
+    const providedHash = request.headers.get('x-app-auth') || '';
+    if (providedHash !== expectedHash) {
+      return Response.json({ error: 'Unauthorized: invalid app password.' }, { status: 401 });
+    }
+  }
+
   try {
     const value = await upstashGet('budget:amount');
     if (!value) {
