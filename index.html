@@ -256,8 +256,13 @@
       transition: background 0.15s ease;
     }
 
-    .auth-card__submit:hover {
+    .auth-card__submit:hover:not(:disabled) {
       background: #134b84;
+    }
+
+    .auth-card__submit:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
     }
 
     .lock-btn {
@@ -390,7 +395,7 @@
 
       <div class="auth-card__error" id="auth-error" role="alert" hidden></div>
 
-      <button type="submit" class="auth-card__submit">Unlock</button>
+      <button type="submit" class="auth-card__submit" id="auth-submit">Unlock</button>
     </form>
   </div>
 

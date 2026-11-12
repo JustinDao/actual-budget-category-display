@@ -1,8 +1,12 @@
-import { createHash } from 'node:crypto';
 import { errorMessage } from '../lib/errors.js';
+import { verifyRequestAuth } from './auth.js';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
+};
 
 async function upstashGet(key: string): Promise<unknown> {
   const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
@@ -12,23 +16,30 @@ async function upstashGet(key: string): Promise<unknown> {
   return data.result ? JSON.parse(decodeURIComponent(data.result)) : null;
 }
 
-export async function GET(request: Request) {
-  const configuredPassword = (process.env.APP_PASSWORD || '').trim();
-  if (configuredPassword) {
-    const expectedHash = createHash('sha256').update(configuredPassword, 'utf8').digest('hex');
-    const providedHash = request.headers.get('x-app-auth') || '';
-    if (providedHash !== expectedHash) {
-      return Response.json({ error: 'Unauthorized: invalid app password.' }, { status: 401 });
-    }
+export async function GET(request: Request): Promise<Response> {
+  if (!verifyRequestAuth(request)) {
+    return Response.json(
+      {
+        error: 'Unauthorized: invalid or expired app session.',
+        authRequired: true,
+      },
+      { status: 401, headers: NO_STORE_HEADERS },
+    );
   }
 
   try {
     const value = await upstashGet('budget:amount');
     if (!value) {
-      return Response.json({ error: 'No data yet — run /api/sync first' }, { status: 404 });
+      return Response.json(
+        { error: 'No data yet — run /api/sync first' },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
     }
-    return Response.json(value);
+    return Response.json(value, { headers: NO_STORE_HEADERS });
   } catch (error) {
-    return Response.json({ error: errorMessage(error) }, { status: 500 });
+    return Response.json(
+      { error: errorMessage(error) },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
   }
 }

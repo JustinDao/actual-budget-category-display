@@ -48,11 +48,11 @@ Add these in your Vercel project settings → Environment Variables:
 | `BUDGET_CATEGORY_NAME` | Exact category name to track, e.g. `Groceries` |
 | `UPSTASH_REDIS_REST_URL` | From Upstash dashboard |
 | `UPSTASH_REDIS_REST_TOKEN` | From Upstash dashboard |
+| `APP_PASSWORD` | Optional app password gate (verified server-side via `/api/auth`; never exposed in frontend bundle) |
 | `CRON_SECRET` | Any random string, e.g. `openssl rand -hex 16` |
 | `HEALTHCHECKS_ACTUAL_URL` | Healthchecks.io ping URL shared by `/api/sync` and `/api/reconcile-investments` |
 | `HEALTHCHECKS_BILT_URL` | Healthchecks.io ping URL for `/api/import-bilt` |
 | `BILT_ACTUAL_ACCOUNT_ID_2` | Account ID in the second Actual budget file for Bilt transactions |
-| `APP_PASSWORD` | Password required to unlock the web UI and access `/api/budget` |
 
 Create two checks in Healthchecks.io and add each check's ping URL as the matching
 environment variable. Treat these URLs as secrets. The Actual check receives
@@ -76,8 +76,11 @@ npx vercel
 Triggered daily by Vercel Cron (8am UTC). Fetches from Actual, writes to Upstash.
 Also callable manually for testing.
 
+### `POST /api/auth` & `GET /api/auth`
+Verifies the client-side SHA-256 pre-hashed password against `APP_PASSWORD` on the server (`scryptSync` + `timingSafeEqual`) and issues or validates a signed, expiring HMAC-SHA256 session token (`x-app-auth`).
+
 ### `GET /api/budget`
-Public read endpoint. Returns:
+Read endpoint (requires a valid `x-app-auth` session token when `APP_PASSWORD` is configured). Returns:
 ```json
 {
   "category": "Groceries",

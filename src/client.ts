@@ -1,10 +1,17 @@
 import { sha256Hex } from './sha256.js';
 
-declare const __APP_PASSWORD_HASH__: string;
+declare const __AUTH_REQUIRED__: boolean;
 
-const AUTH_STORAGE_KEY = 'ab_auth_hash_v1';
-const APP_PASSWORD_HASH =
-  typeof __APP_PASSWORD_HASH__ === 'string' ? __APP_PASSWORD_HASH__ : '';
+const AUTH_SESSION_STORAGE_KEY = 'ab_auth_session_v2';
+const LEGACY_AUTH_HASH_KEY = 'ab_auth_hash_v1';
+
+interface AuthApiResponse {
+  ok?: boolean;
+  authenticated?: boolean;
+  authRequired?: boolean;
+  sessionToken?: string;
+  error?: string;
+}
 
 interface BudgetTransaction {
   date: string;
@@ -26,6 +33,7 @@ interface BudgetResponse {
   updatedAt?: string;
   transactions?: BudgetTransaction[];
   assignments?: BudgetAssignment[];
+  authRequired?: boolean;
   error?: string;
 }
 
@@ -47,6 +55,7 @@ const authGate = requiredElement<HTMLDivElement>('auth-gate');
 const authForm = requiredElement<HTMLFormElement>('auth-form');
 const authInput = requiredElement<HTMLInputElement>('auth-input');
 const authError = requiredElement<HTMLDivElement>('auth-error');
+const authSubmit = requiredElement<HTMLButtonElement>('auth-submit');
 const appContent = requiredElement<HTMLDivElement>('app-content');
 const lockButton = requiredElement<HTMLButtonElement>('lock-btn');
 
@@ -57,7 +66,9 @@ const updatedLabel = requiredElement<HTMLParagraphElement>('updated-label');
 const transactionScroll = requiredElement<HTMLDivElement>('txns-scroll');
 const transactionList = requiredElement<HTMLUListElement>('txns');
 
-let isPasswordRequired = Boolean(APP_PASSWORD_HASH);
+let isPasswordRequired =
+  typeof __AUTH_REQUIRED__ !== 'undefined' && Boolean(__AUTH_REQUIRED__);
+let isUnlocking = false;
 let hasLoadedBudget = false;
 
 function formatMoney(value: number): string {
@@ -67,35 +78,60 @@ function formatMoney(value: number): string {
   });
 }
 
-function getSavedAuthHash(): string {
+function isTokenFormatUnexpired(token: string): boolean {
+  const parts = token.trim().split('.');
+  if (parts.length !== 2 || !parts[0] || !/^[a-f0-9]{64}$/i.test(parts[1])) {
+    return false;
+  }
   try {
-    return localStorage.getItem(AUTH_STORAGE_KEY) || '';
+    const base64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const decoded = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof decoded?.exp === 'number' && decoded.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function getSavedSessionToken(): string {
+  try {
+    localStorage.removeItem(LEGACY_AUTH_HASH_KEY);
+    const savedToken = localStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    if (savedToken && isTokenFormatUnexpired(savedToken)) {
+      return savedToken;
+    }
+    localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    return '';
   } catch {
     return '';
   }
 }
 
-function saveAuthHash(hash: string): void {
+function saveSessionToken(token: string): void {
   try {
-    localStorage.setItem(AUTH_STORAGE_KEY, hash);
+    localStorage.removeItem(LEGACY_AUTH_HASH_KEY);
+    if (token) {
+      localStorage.setItem(AUTH_SESSION_STORAGE_KEY, token);
+    }
   } catch {
     // Ignore storage errors
   }
 }
 
-function clearAuthHash(): void {
+function clearSessionToken(): void {
   try {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_AUTH_HASH_KEY);
   } catch {
     // Ignore storage errors
   }
 }
 
 function checkInitialAuth(): boolean {
-  if (!APP_PASSWORD_HASH) {
+  if (!isPasswordRequired) {
     return true;
   }
-  return getSavedAuthHash() === APP_PASSWORD_HASH;
+  return Boolean(getSavedSessionToken());
 }
 
 function setAuthError(message: string): void {
@@ -103,8 +139,19 @@ function setAuthError(message: string): void {
   authError.hidden = !message;
 }
 
+function clearDisplayedData(): void {
+  hasLoadedBudget = false;
+  categoryLabel.textContent = 'Loading';
+  amountLabel.textContent = '—';
+  monthLabel.classList.remove('error');
+  monthLabel.textContent = '';
+  updatedLabel.textContent = '';
+  transactionList.replaceChildren();
+}
+
 function showAuthGate(errorText = ''): void {
   appContent.hidden = true;
+  lockButton.hidden = true;
   authGate.hidden = false;
   setAuthError(errorText);
   authInput.focus();
@@ -119,44 +166,74 @@ function showApp(): void {
   }
 }
 
-function unlockApp(event: SubmitEvent): void {
+async function unlockApp(event: SubmitEvent): Promise<void> {
   event.preventDefault();
+  if (isUnlocking) {
+    return;
+  }
+
   const trimmed = authInput.value.trim();
   if (!trimmed) {
     setAuthError('Please enter the password.');
     return;
   }
 
-  const inputHash = sha256Hex(trimmed);
-  if (APP_PASSWORD_HASH && inputHash !== APP_PASSWORD_HASH) {
-    setAuthError('Incorrect password.');
-    return;
-  }
-
-  saveAuthHash(inputHash);
-  authInput.value = '';
+  // Pre-hash on the client so the plaintext password never leaves the browser.
+  const clientHash = sha256Hex(trimmed);
+  isUnlocking = true;
+  authSubmit.disabled = true;
+  authSubmit.textContent = 'Verifying...';
   setAuthError('');
-  showApp();
+
+  try {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ clientHash }),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as AuthApiResponse;
+    if (response.ok && data.ok && data.authenticated) {
+      saveSessionToken(data.sessionToken || '');
+      if (data.authRequired !== undefined) {
+        isPasswordRequired = Boolean(data.authRequired);
+      }
+      authInput.value = '';
+      setAuthError('');
+      showApp();
+    } else {
+      setAuthError(data.error || 'Incorrect password.');
+    }
+  } catch {
+    setAuthError(
+      'Unable to reach authentication server. Make sure the API server is running.',
+    );
+  } finally {
+    isUnlocking = false;
+    authSubmit.disabled = false;
+    authSubmit.textContent = 'Unlock';
+  }
 }
 
-function lockApp(): void {
-  clearAuthHash();
+function lockApp(reason = ''): void {
+  clearSessionToken();
+  clearDisplayedData();
   authInput.value = '';
-  showAuthGate('');
+  showAuthGate(reason);
 }
 
 async function load(): Promise<void> {
   try {
-    const savedHash = getSavedAuthHash();
+    const savedToken = getSavedSessionToken();
     const response = await fetch('/api/budget', {
-      headers: savedHash ? { 'x-app-auth': savedHash } : {},
+      headers: savedToken ? { 'x-app-auth': savedToken } : {},
     });
 
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       isPasswordRequired = true;
-      hasLoadedBudget = false;
-      clearAuthHash();
-      showAuthGate(savedHash ? 'Incorrect password.' : '');
+      lockApp(savedToken ? 'Session expired. Please sign in again.' : '');
       return;
     }
 
@@ -197,7 +274,8 @@ async function load(): Promise<void> {
     categoryLabel.textContent = 'Error';
     amountLabel.textContent = '—';
     monthLabel.classList.add('error');
-    monthLabel.textContent = error instanceof Error ? error.message : String(error);
+    monthLabel.textContent =
+      error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -230,10 +308,13 @@ function renderTransactions(data: BudgetResponse): void {
 
   for (const row of rows) {
     const [year, month, day] = row.date.split('-').map(Number);
-    const dateText = new Date(year, month - 1, day).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    });
+    const dateText = new Date(year, month - 1, day).toLocaleDateString(
+      'en-US',
+      {
+        month: 'short',
+        day: 'numeric',
+      },
+    );
     const isAssignment = row.kind === 'assign';
 
     const item = document.createElement('li');
@@ -264,8 +345,12 @@ function renderTransactions(data: BudgetResponse): void {
   }
 }
 
-authForm.addEventListener('submit', unlockApp);
-lockButton.addEventListener('click', lockApp);
+authForm.addEventListener('submit', (event) => {
+  void unlockApp(event);
+});
+lockButton.addEventListener('click', () => {
+  lockApp();
+});
 
 if (checkInitialAuth()) {
   showApp();

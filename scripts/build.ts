@@ -1,16 +1,12 @@
-import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 
 try {
-  process.loadEnvFile('.env.local');
+  process.loadEnvFile?.('.env.local');
 } catch {
-  // .env.local is optional (e.g. in CI / Vercel builds)
+  // .env.local is optional (e.g. on Vercel builds)
 }
 
-const rawPassword = (process.env.APP_PASSWORD || '').trim();
-const appPasswordHash = rawPassword
-  ? createHash('sha256').update(rawPassword, 'utf8').digest('hex')
-  : '';
+const authRequired = Boolean((process.env.APP_PASSWORD || '').trim());
 
 await Promise.all([
   build({
@@ -20,7 +16,7 @@ await Promise.all([
     platform: 'browser',
     target: 'es2022',
     define: {
-      __APP_PASSWORD_HASH__: JSON.stringify(appPasswordHash),
+      __AUTH_REQUIRED__: JSON.stringify(authRequired),
     },
   }),
   build({
