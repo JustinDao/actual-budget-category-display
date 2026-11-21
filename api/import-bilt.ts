@@ -2,6 +2,7 @@ import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
 import { Configuration, PlaidApi, PlaidEnvironments, type Transaction, type RemovedTransaction } from 'plaid'
 import { pingHealthcheck } from './healthchecks.js'
+import { verifyCronAuth } from '../lib/cron-auth.js'
 import { errorMessage } from '../lib/errors.js'
 
 export const dynamic = 'force-dynamic'
@@ -147,8 +148,7 @@ function toActual(t: Transaction, accountId: string) {
 
 export async function GET(request: Request): Promise<Response> {
   // Fail closed if CRON_SECRET is missing. Vercel Cron sends this header automatically.
-  const secret = process.env.CRON_SECRET
-  if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+  if (!verifyCronAuth(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

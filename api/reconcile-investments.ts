@@ -1,7 +1,10 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
 import { pingHealthcheck } from './healthchecks.js'
+import { verifyCronAuth } from '../lib/cron-auth.js'
 import { errorMessage } from '../lib/errors.js'
+
+export const dynamic = 'force-dynamic'
 
 const RECONCILIATION_PAYEE = 'Automatic Investment Reconciliation'
 const RECONCILIATION_NOTE = 'Automatically generated after bank sync'
@@ -28,11 +31,8 @@ function isNonFatalSyncError(error: unknown): boolean {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  // Protect this endpoint with a secret so randos can't trigger it
-  const authHeader = request.headers.get('authorization')
-  const hasSecret = new URL(request.url).searchParams.get('secret') === process.env.CRON_SECRET
-
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && !hasSecret) {
+  // Fail closed if CRON_SECRET is missing. Vercel Cron sends this header automatically.
+  if (!verifyCronAuth(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

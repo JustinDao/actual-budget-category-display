@@ -70,9 +70,17 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/exchange') {
+      const MAX_BODY_BYTES = 16 * 1024
+      let totalBytes = 0
       const chunks: Buffer[] = []
       for await (const chunk of req) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        totalBytes += buf.length
+        if (totalBytes > MAX_BODY_BYTES) {
+          res.writeHead(413).end('Payload too large')
+          return
+        }
+        chunks.push(buf)
       }
       const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       if (
@@ -108,4 +116,4 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(3000, () => console.log('Open http://localhost:3000'))
+server.listen(3000, '127.0.0.1', () => console.log('Open http://localhost:3000'))

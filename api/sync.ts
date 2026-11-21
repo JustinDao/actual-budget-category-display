@@ -1,6 +1,7 @@
 import * as api from '@actual-app/api'
 import { mkdirSync } from 'fs'
 import { errorMessage } from '../lib/errors.js'
+import { verifyCronAuth } from '../lib/cron-auth.js'
 import { pingHealthcheck } from './healthchecks.js'
 
 export const dynamic = 'force-dynamic'
@@ -140,8 +141,7 @@ function shiftMonth(ym: string, delta: number): string {
 
 export async function GET(request: Request): Promise<Response> {
   // Fail closed if CRON_SECRET is missing. Vercel Cron sends this header automatically.
-  const secret = process.env.CRON_SECRET
-  if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+  if (!verifyCronAuth(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

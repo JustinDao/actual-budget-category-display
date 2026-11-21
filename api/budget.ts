@@ -1,4 +1,3 @@
-import { errorMessage } from '../lib/errors.js';
 import { verifyRequestAuth } from './auth.js';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
@@ -9,11 +8,24 @@ const NO_STORE_HEADERS = {
 };
 
 async function upstashGet(key: string): Promise<unknown> {
-  const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    throw new Error('Upstash Redis is not configured');
+  }
+  const res = await fetch(`${UPSTASH_URL}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
   });
-  const data = await res.json();
-  return data.result ? JSON.parse(decodeURIComponent(data.result)) : null;
+  if (!res.ok) {
+    throw new Error(`Upstash read failed: ${res.status}`);
+  }
+  const data = (await res.json()) as { result?: unknown };
+  if (typeof data.result !== 'string' || !data.result) {
+    return null;
+  }
+  try {
+    return JSON.parse(data.result);
+  } catch {
+    return JSON.parse(decodeURIComponent(data.result));
+  }
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -37,8 +49,9 @@ export async function GET(request: Request): Promise<Response> {
     }
     return Response.json(value, { headers: NO_STORE_HEADERS });
   } catch (error) {
+    console.error('Failed to load budget data:', error);
     return Response.json(
-      { error: errorMessage(error) },
+      { error: 'Failed to load budget data.' },
       { status: 500, headers: NO_STORE_HEADERS },
     );
   }

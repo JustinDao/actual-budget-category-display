@@ -21,6 +21,15 @@ export function getConfiguredPassword(): string {
   return (process.env.APP_PASSWORD || '').trim();
 }
 
+const derivedKeysCache = new Map<
+  string,
+  {
+    expectedVerifier: Buffer;
+    salt: Buffer;
+    signingKey: Buffer;
+  }
+>();
+
 function derivePasswordKeys(configuredPassword: string): {
   expectedVerifier: Buffer;
   salt: Buffer;
@@ -29,6 +38,11 @@ function derivePasswordKeys(configuredPassword: string): {
   const expectedClientHash = createHash('sha256')
     .update(configuredPassword, 'utf8')
     .digest('hex');
+  const cached = derivedKeysCache.get(expectedClientHash);
+  if (cached) {
+    return cached;
+  }
+
   const salt = createHash('sha256')
     .update(`ab-auth-salt-v1:${configuredPassword}`, 'utf8')
     .digest();
@@ -38,7 +52,9 @@ function derivePasswordKeys(configuredPassword: string): {
     'ab-session-signing-key-v1',
     32,
   );
-  return { expectedVerifier, salt, signingKey };
+  const keys = { expectedVerifier, salt, signingKey };
+  derivedKeysCache.set(expectedClientHash, keys);
+  return keys;
 }
 
 export function verifyClientPasswordHash(
@@ -113,8 +129,14 @@ export function verifySessionToken(
     if (
       typeof decoded !== 'object' ||
       decoded === null ||
+      !('v' in decoded) ||
+      decoded.v !== 1 ||
+      !('iat' in decoded) ||
+      typeof decoded.iat !== 'number' ||
+      !Number.isFinite(decoded.iat) ||
       !('exp' in decoded) ||
       typeof decoded.exp !== 'number' ||
+      !Number.isFinite(decoded.exp) ||
       decoded.exp <= nowMs
     ) {
       return false;
